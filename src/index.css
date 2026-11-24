@@ -1,0 +1,219 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700;800&family=Prompt:wght@500;600;700&display=swap');
+@import 'leaflet/dist/leaflet.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Noto Sans Thai', ui-sans-serif, system-ui, sans-serif;
+  }
+  body {
+    @apply bg-slate-100 text-slate-800 antialiased;
+  }
+}
+
+/* ---------- Sage & Sand theme variables (light defaults, dark overrides) ---------- */
+
+:root {
+  --c-slate-50: 243 240 233;
+  --c-slate-100: 236 232 222;
+  --c-slate-200: 229 224 216;
+  --c-slate-300: 207 200 187;
+  --c-slate-400: 163 156 141;
+  --c-slate-500: 125 118 106;
+  --c-slate-600: 99 93 82;
+  --c-slate-700: 78 73 64;
+  --c-slate-800: 59 56 49;
+  --c-slate-900: 47 51 46;
+
+  --c-teal-50: 238 242 239;
+  --c-teal-100: 220 229 224;
+  --c-teal-300: 157 187 172;
+  --c-teal-400: 127 166 148;
+  --c-teal-500: 94 130 113;
+  --c-teal-600: 74 107 93;
+  --c-teal-700: 59 87 75;
+
+  --c-sky-50: 247 242 234;
+  --c-sky-100: 240 230 214;
+  --c-sky-200: 227 210 184;
+  --c-sky-300: 200 159 114;
+  --c-sky-400: 181 139 94;
+  --c-sky-500: 166 123 79;
+  --c-sky-600: 143 104 64;
+  --c-sky-700: 116 84 52;
+
+  --c-emerald-50: 238 242 239;
+  --c-emerald-100: 220 229 224;
+  --c-emerald-200: 196 213 203;
+  --c-emerald-300: 164 191 177;
+  --c-emerald-400: 127 166 148;
+  --c-emerald-500: 94 130 113;
+  --c-emerald-600: 74 107 93;
+  --c-emerald-700: 59 87 75;
+  --c-emerald-800: 46 69 59;
+
+  --c-amber-50: 248 242 233;
+  --c-amber-100: 241 229 210;
+  --c-amber-200: 228 208 179;
+  --c-amber-300: 209 176 134;
+  --c-amber-500: 200 159 114;
+  --c-amber-600: 181 139 94;
+  --c-amber-700: 146 111 72;
+
+  --c-orange-100: 241 229 210;
+  --c-orange-600: 181 139 94;
+
+  --c-indigo-50: 238 242 239;
+
+  --c-rose-50: 254 242 242;
+  --c-rose-200: 254 205 211;
+  --c-rose-300: 253 164 175;
+  --c-rose-500: 244 63 94;
+  --c-rose-600: 225 29 72;
+  --c-rose-700: 190 18 60;
+
+  --map-bg: 219 234 254;
+  --pin-start: #4a6b5d;
+  --pin-end: #b5533c;
+  --pin-stop: #8f6840;
+  --route-color: #4a6b5d;
+}
+
+html.dark {
+  --c-slate-50: 22 29 26;
+  --c-slate-100: 28 36 33;
+  --c-slate-200: 44 56 51;
+  --c-slate-300: 60 74 68;
+  --c-slate-400: 119 131 124;
+  --c-slate-500: 163 176 170;
+  --c-slate-600: 190 201 195;
+  --c-slate-700: 213 220 215;
+  --c-slate-800: 231 234 228;
+  --c-slate-900: 243 241 236;
+
+  --c-teal-50: 30 40 35;
+  --c-teal-100: 36 49 43;
+  --c-teal-300: 62 87 76;
+  --c-teal-400: 86 122 106;
+  --c-teal-500: 107 148 131;
+  --c-teal-600: 107 148 131;
+  --c-teal-700: 130 168 151;
+
+  --c-sky-50: 42 36 28;
+  --c-sky-100: 51 44 33;
+  --c-sky-200: 70 59 43;
+  --c-sky-300: 107 90 66;
+  --c-sky-400: 200 159 114;
+  --c-sky-500: 212 174 130;
+  --c-sky-600: 212 174 130;
+  --c-sky-700: 224 191 151;
+
+  --c-emerald-50: 30 40 35;
+  --c-emerald-100: 36 49 43;
+  --c-emerald-200: 46 64 56;
+  --c-emerald-300: 62 87 76;
+  --c-emerald-400: 107 148 131;
+  --c-emerald-500: 107 148 131;
+  --c-emerald-600: 127 166 148;
+  --c-emerald-700: 157 187 172;
+  --c-emerald-800: 183 206 193;
+
+  --c-amber-50: 42 36 28;
+  --c-amber-100: 51 44 33;
+  --c-amber-200: 70 59 43;
+  --c-amber-300: 107 90 66;
+  --c-amber-500: 212 174 130;
+  --c-amber-600: 212 174 130;
+  --c-amber-700: 230 199 158;
+
+  --c-orange-100: 51 44 33;
+  --c-orange-600: 212 174 130;
+
+  --c-indigo-50: 30 40 35;
+
+  --c-rose-50: 46 31 29;
+  --c-rose-200: 74 47 44;
+  --c-rose-300: 122 82 76;
+  --c-rose-500: 217 108 92;
+  --c-rose-600: 224 125 109;
+  --c-rose-700: 232 149 135;
+
+  --map-bg: 18 24 22;
+  --pin-start: #6b9483;
+  --pin-end: #d4ae82;
+  --pin-stop: #d4ae82;
+  --route-color: #d4ae82;
+}
+
+/* Leaflet look & feel tuned to the app theme */
+.leaflet-container {
+  font-family: 'Noto Sans Thai', ui-sans-serif, system-ui, sans-serif;
+  background: rgb(var(--map-bg));
+}
+
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: rgb(var(--c-slate-100));
+  color: rgb(var(--c-slate-900));
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 0.75rem;
+  box-shadow: 0 10px 25px -5px rgb(15 23 42 / 0.25);
+}
+
+.leaflet-popup-content {
+  margin: 12px 16px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.leaflet-popup-tip {
+  box-shadow: none;
+}
+
+/* lightbox-style dark tile hint for attribution text */
+html.dark .leaflet-control-attribution {
+  background: rgb(28 36 33 / 0.85);
+  color: rgb(var(--c-slate-400));
+}
+html.dark .leaflet-control-attribution a {
+  color: rgb(var(--c-slate-500));
+}
+
+.route-pin {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9999px 9999px 9999px 0;
+  transform: rotate(-45deg);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 4px 10px rgb(15 23 42 / 0.35);
+  border: 2px solid #fff;
+}
+
+.route-pin > span {
+  transform: rotate(45deg);
+}
+
+/* number inputs: hide spinners for a cleaner look */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* native date-picker icon should stay visible on dark inputs */
+html.dark input[type='date']::-webkit-calendar-picker-indicator {
+  filter: invert(0.8);
+}
