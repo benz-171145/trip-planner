@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#4A6B5D"/>
+  <!-- route: dashed sand path -->
+  <path d="M132 392 C 200 392, 190 322, 256 322 S 330 392, 384 352" fill="none" stroke="#D4AE82" stroke-width="22" stroke-linecap="round" stroke-dasharray="1 44"/>
+  <circle cx="132" cy="392" r="20" fill="#D4AE82"/>
+  <!-- map pin -->
+  <path d="M256 92 C 200 92, 160 134, 160 188 C 160 252, 232 312, 256 346 C 280 312, 352 252, 352 188 C 352 134, 312 92, 256 92 Z" fill="#FFFFFF"/>
+  <circle cx="256" cy="188" r="44" fill="#4A6B5D"/>
+  <circle cx="256" cy="188" r="20" fill="#D4AE82"/>
+</svg>

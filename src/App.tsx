@@ -73,6 +73,8 @@ type Day = {
 let idSeq = 0;
 const uid = () => Date.now() * 1000 + (idSeq++ % 1000);
 
+const emptyDays = (): Day[] => [{ id: uid(), stops: [{ id: uid(), name: '' }] }];
+
 const toDays = (groups: string[][]): Day[] =>
   groups.map((names) => ({
     id: uid(),
@@ -294,12 +296,23 @@ function pinIcon(bg: string, label: string, icon: 'start' | 'end' | 'stop') {
   });
 }
 
-function FitBounds({ coords }: { coords: [number, number][] }) {
+const NO_COORDS: [number, number][] = [];
+
+function FitBounds({
+  coords,
+  active,
+}: {
+  coords: [number, number][];
+  active: boolean;
+}) {
   const map = useMap();
   useEffect(() => {
+    // แผนที่ถูกซ่อนอยู่ (อีกแท็บ) → รอให้แสดงก่อน แล้วค่อยคำนวณขนาด/กรอบใหม่
+    if (!active) return;
+    map.invalidateSize();
     if (coords.length < 2) return;
     map.fitBounds(L.latLngBounds(coords), { padding: [48, 48] });
-  }, [coords, map]);
+  }, [coords, map, active]);
   return null;
 }
 
@@ -308,27 +321,34 @@ function FitBounds({ coords }: { coords: [number, number][] }) {
 function App() {
   const [dark, setDark] = useState(() => {
     const saved = localStorage.getItem('theme');
-    if (saved === 'light' || saved === 'dark') return saved === 'dark';
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    // ค่าเริ่มต้นเป็นโหมดสว่างเสมอ — ใช้โหมดมืดเมื่อผู้ใช้เลือกเองเท่านั้น
+    return saved === 'dark';
   });
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
-    localStorage.setItem('theme', dark ? 'dark' : 'light');
   }, [dark]);
+
+  // บันทึกลง localStorage เฉพาะเมื่อผู้ใช้กดสลับธีมเอง
+  const toggleTheme = () =>
+    setDark((d) => {
+      localStorage.setItem('theme', d ? 'light' : 'dark');
+      return !d;
+    });
 
   const [origin, setOrigin] = useState('เมืองร้อยเอ็ด');
   const [destination, setDestination] = useState('');
-  const [days, setDays] = useState<Day[]>([]);
+  const [tab, setTab] = useState<'plan' | 'saved'>('plan');
+  const [days, setDays] = useState<Day[]>(emptyDays);
 
   const [carName, setCarName] = useState('Honda City 1.0 Turbo RS');
   const [fuelEfficiency, setFuelEfficiency] = useState('18');
   const [fuelPrice, setFuelPrice] = useState('37');
   const [nights, setNights] = useState<Night[]>([
-    makeNight(1, '600'),
-    makeNight(2, '600'),
+    makeNight(1, '0'),
+    makeNight(2, '0'),
   ]);
-  const [food, setFood] = useState('800');
+  const [food, setFood] = useState('0');
 
   const [roundTrip, setRoundTrip] = useState(false);
   const [travelers, setTravelers] = useState('2');
@@ -514,12 +534,12 @@ function App() {
   const resetAll = () => {
     setOrigin('เมืองร้อยเอ็ด');
     setDestination('');
-    setDays([]);
+    setDays(emptyDays());
     setCarName('Honda City 1.0 Turbo RS');
     setFuelEfficiency('18');
     setFuelPrice('37');
-    setNights([makeNight(1, '600'), makeNight(2, '600')]);
-    setFood('800');
+    setNights([makeNight(1, '0'), makeNight(2, '0')]);
+    setFood('0');
   };
 
   const googleMapsUrl = useMemo(() => {
@@ -640,7 +660,8 @@ function App() {
   const loadTrip = (trip: SavedTrip) => {
     setOrigin(trip.origin);
     setDestination(trip.destination);
-    setDays(daysFromTrip(trip));
+    const loaded = daysFromTrip(trip);
+    setDays(loaded.length > 0 ? loaded : emptyDays());
     setCarName(trip.carName);
     setFuelEfficiency(trip.fuelEfficiency);
     setFuelPrice(trip.fuelPrice);
@@ -648,6 +669,7 @@ function App() {
     setFood(trip.food);
     setRoundTrip(trip.roundTrip);
     setTravelers(trip.travelers || '2');
+    setTab('plan');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -858,7 +880,7 @@ function App() {
             <span className="hidden sm:inline">รีเซ็ต</span>
           </button>
           <button
-            onClick={() => setDark((d) => !d)}
+            onClick={toggleTheme}
             aria-label={dark ? 'สลับเป็นโหมดสว่าง' : 'สลับเป็นโหมดมืด'}
             title={dark ? 'โหมดสว่าง' : 'โหมดมืด'}
             className="grid h-9 w-9 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 active:scale-95 dark:border-slate-200 dark:bg-slate-100 dark:text-amber-300 dark:hover:bg-slate-200"
@@ -868,7 +890,49 @@ function App() {
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[420px_1fr] lg:items-start">
+      {/* Tab navigation — Pill Tabs */}
+      <nav
+        aria-label="เมนูหลัก"
+        className="mx-auto max-w-7xl px-4 pt-4 sm:px-6"
+      >
+        <div
+          role="tablist"
+          className="flex w-full gap-1 rounded-full border border-slate-200 bg-white p-1 shadow-sm sm:inline-flex sm:w-auto"
+        >
+          {(
+            [
+              { key: 'plan', label: 'วางแผนทริป', Icon: MapPinned },
+              {
+                key: 'saved',
+                label: `ทริปที่บันทึกไว้${savedTrips.length > 0 ? ` (${savedTrips.length})` : ''}`,
+                Icon: FolderOpen,
+              },
+            ] as const
+          ).map(({ key, label, Icon }) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={tab === key}
+              onClick={() => setTab(key)}
+              className={`flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-xs font-bold transition active:scale-[0.97] sm:flex-none sm:px-5 sm:text-sm ${
+                tab === key
+                  ? 'bg-teal-600 text-white shadow-sm'
+                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+              }`}
+            >
+              <Icon size={15} />
+              {label}
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      {/* แท็บที่ 1: วางแผนทริป — ซ่อนด้วย hidden แทนการ unmount เพื่อไม่ให้ข้อมูลที่กรอกค้างไว้หาย */}
+      <main
+        className={`mx-auto max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[420px_1fr] lg:items-start ${
+          tab === 'plan' ? 'grid' : 'hidden'
+        }`}
+      >
         {/* ============ Left: Form ============ */}
         <div className="space-y-5">
           {/* Route card */}
@@ -1197,7 +1261,7 @@ function App() {
                       : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
                   }
                 />
-                {mapLine && <FitBounds coords={mapLine} />}
+                <FitBounds coords={mapLine ?? NO_COORDS} active={tab === 'plan'} />
                 {route && (
                   <>
                     <Polyline
@@ -1443,8 +1507,11 @@ function App() {
         </div>
       </main>
 
-      {/* ============ Saved trips ============ */}
-      <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6 max-sm:pb-24">
+      {/* ============ Saved trips (แท็บที่ 2) ============ */}
+      <section
+        hidden={tab !== 'saved'}
+        className="mx-auto max-w-7xl px-4 pb-16 pt-6 sm:px-6 max-sm:pb-24"
+      >
         <div className="mb-4 flex items-center gap-2">
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-emerald-50 text-emerald-600">
             <FolderOpen size={17} />
