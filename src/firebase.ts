@@ -15,3 +15,4 @@ const app = initializeApp(firebaseConfig);
 
 export const db = getFirestore(app);
 export const tripsRef = collection(db, 'trips');
+export const tripPhotosRef = collection(db, 'trip_photos');

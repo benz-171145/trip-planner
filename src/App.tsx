@@ -10,6 +10,7 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import { db, tripsRef } from './firebase';
+import { GalleryTab, useTripPhotos } from './Gallery';
 import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
@@ -41,6 +42,10 @@ import {
   MapPinned,
   Moon,
   Navigation,
+  Plane,
+  Bus,
+  TrainFront,
+  CarTaxiFront,
   Plus,
   Receipt,
   Repeat,
@@ -97,6 +102,21 @@ function daysFromTrip(trip: {
   return [];
 }
 
+// ---------- โหมดการเดินทาง ----------
+
+type TravelMode = 'car' | 'public';
+type TransitType = 'plane' | 'bus' | 'train' | 'van';
+
+const TRANSIT_OPTIONS: { key: TransitType; label: string; ticket: string; Icon: LucideIcon }[] = [
+  { key: 'plane', label: 'เครื่องบิน', ticket: 'ค่าตั๋วเครื่องบิน', Icon: Plane },
+  { key: 'bus', label: 'รถทัวร์', ticket: 'ค่าตั๋วรถทัวร์', Icon: Bus },
+  { key: 'train', label: 'รถไฟ', ticket: 'ค่าตั๋วรถไฟ', Icon: TrainFront },
+  { key: 'van', label: 'รถตู้/อื่นๆ', ticket: 'ค่าตั๋วรถตู้/อื่นๆ', Icon: CarTaxiFront },
+];
+
+const asTransitType = (v: unknown): TransitType =>
+  TRANSIT_OPTIONS.some((o) => o.key === v) ? (v as TransitType) : 'bus';
+
 type Night = {
   id: number;
   label: string;
@@ -128,6 +148,11 @@ type SavedTrip = {
   destination: string;
   stopNames?: string[];
   days?: { stops: string[] }[];
+  // ฟิลด์โหมดการเดินทางเพิ่มภายหลัง → ทริปเก่าไม่มี ให้ถือเป็น "รถส่วนตัว"
+  travelMode?: TravelMode;
+  transitType?: TransitType;
+  ticketPrice?: string;
+  localCost?: string;
   carName: string;
   fuelEfficiency: string;
   fuelPrice: string;
@@ -250,8 +275,11 @@ const parseNum = (v: string) => {
 
 // ---------- Photo helpers ----------
 
-const MAX_PHOTOS = 4;
-const MAX_DOC_BYTES = 900_000; // เผื่อมาร์จินก่อนชนขีดจำกัด 1MB ของเอกสาร Firestore
+const MAX_PHOTOS = 6;
+// รูปทั้งหมดถูกเก็บเป็น Base64 ในเอกสารทริปเดียว (จำกัด 1 MiB) → รวมกันไม่เกิน ~800 KB
+// เผื่อ ~200 KB ให้ฟิลด์อื่นของทริป (ชื่อ, เช็กลิสต์ ฯลฯ)
+const MAX_DOC_BYTES = 800_000;
+const MAX_PHOTO_BYTES = Math.floor(MAX_DOC_BYTES / MAX_PHOTOS); // ~133 KB ต่อรูป
 
 // ย่อรูปด้วย HTML5 Canvas (กว้างสุด 800px, JPEG 0.7) แล้วแปลงเป็น Base64
 function resizeImage(file: File): Promise<string> {
@@ -262,16 +290,26 @@ function resizeImage(file: File): Promise<string> {
       const img = new Image();
       img.onerror = () => reject(new Error('decode failed'));
       img.onload = () => {
-        const scale = Math.min(1, 800 / img.width);
-        const w = Math.round(img.width * scale);
-        const h = Math.round(img.height * scale);
+        // ด้านยาวสุดไม่เกิน 900px, JPEG 0.65 — ถ้ายังใหญ่กว่างบต่อรูป ลดคุณภาพ/ขนาดลงอีกจนพอดี
+        let maxSide = 900;
+        let quality = 0.65;
         const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
         const ctx = canvas.getContext('2d');
         if (!ctx) return reject(new Error('canvas failed'));
-        ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
+        let data = '';
+        for (let attempt = 0; attempt < 8; attempt++) {
+          const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+          canvas.width = Math.max(1, Math.round(img.width * scale));
+          canvas.height = Math.max(1, Math.round(img.height * scale));
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          data = canvas.toDataURL('image/jpeg', quality);
+          if (data.length * 0.75 <= MAX_PHOTO_BYTES) break;
+          if (quality > 0.45) quality -= 0.1;
+          else maxSide = Math.round(maxSide * 0.8);
+        }
+        resolve(data);
       };
       img.src = reader.result as string;
     };
@@ -297,6 +335,18 @@ function pinIcon(bg: string, label: string, icon: 'start' | 'end' | 'stop') {
 }
 
 const NO_COORDS: [number, number][] = [];
+
+// คำนวณขนาดแผนที่ใหม่เมื่อสลับธีมหรือกลับมาที่แท็บ "วางแผนทริป" (กันแผนที่ค้างเป็นจอดำ/ไทล์ไม่เต็มกรอบ)
+function MapResizer({ active, dark }: { active: boolean; dark: boolean }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!active) return;
+    map.invalidateSize();
+    const t = setTimeout(() => map.invalidateSize(), 150);
+    return () => clearTimeout(t);
+  }, [map, active, dark]);
+  return null;
+}
 
 function FitBounds({
   coords,
@@ -338,9 +388,14 @@ function App() {
 
   const [origin, setOrigin] = useState('เมืองร้อยเอ็ด');
   const [destination, setDestination] = useState('');
-  const [tab, setTab] = useState<'plan' | 'saved'>('plan');
+  const [tab, setTab] = useState<'plan' | 'saved' | 'gallery'>('plan');
+  const tripPhotos = useTripPhotos();
   const [days, setDays] = useState<Day[]>(emptyDays);
 
+  const [travelMode, setTravelMode] = useState<TravelMode>('car');
+  const [transitType, setTransitType] = useState<TransitType>('bus');
+  const [ticketPrice, setTicketPrice] = useState('0');
+  const [localCost, setLocalCost] = useState('0');
   const [carName, setCarName] = useState('Honda City 1.0 Turbo RS');
   const [fuelEfficiency, setFuelEfficiency] = useState('18');
   const [fuelPrice, setFuelPrice] = useState('37');
@@ -486,16 +541,26 @@ function App() {
 
   const efficiency = parseNum(fuelEfficiency) || 1;
   const fuelLiters = totalDistanceKm !== null ? totalDistanceKm / efficiency : null;
-  const fuelCost = fuelLiters !== null ? fuelLiters * parseNum(fuelPrice) : null;
+  const isPublic = travelMode === 'public';
+  const transit = TRANSIT_OPTIONS.find((o) => o.key === transitType) ?? TRANSIT_OPTIONS[1];
+  // รถส่วนตัว: ค่าน้ำมัน (ขึ้นกับระยะทาง) | ขนส่งสาธารณะ: ค่าตั๋ว/เที่ยว (x2 เมื่อไป-กลับ) — ไม่ขึ้นกับเส้นทาง
+  const fuelCost =
+    !isPublic && fuelLiters !== null ? fuelLiters * parseNum(fuelPrice) : null;
+  const ticketCost = isPublic ? parseNum(ticketPrice) * (roundTrip ? 2 : 1) : 0;
+  const localTransportCost = isPublic ? parseNum(localCost) : 0;
   const stayCost = nights.reduce((sum, n) => sum + parseNum(n.amount), 0);
   const foodCost = parseNum(food);
-  const grandTotal = (fuelCost ?? 0) + stayCost + foodCost;
+  const grandTotal =
+    (fuelCost ?? 0) + ticketCost + localTransportCost + stayCost + foodCost;
   const perPerson = travelers.trim() !== '' && parseNum(travelers) > 0
     ? grandTotal / parseNum(travelers)
     : null;
 
   const expenseData = [
-    { name: 'ค่าน้ำมัน', value: Math.round(fuelCost ?? 0), color: dark ? '#D4AE82' : '#4A6B5D' },
+    isPublic
+      ? { name: transit.ticket, value: Math.round(ticketCost), color: dark ? '#D4AE82' : '#4A6B5D' }
+      : { name: 'ค่าน้ำมัน', value: Math.round(fuelCost ?? 0), color: dark ? '#D4AE82' : '#4A6B5D' },
+    { name: 'ค่าเดินทางท้องถิ่น', value: Math.round(localTransportCost), color: dark ? '#E6C79E' : '#7FA694' },
     { name: 'ค่าที่พัก', value: Math.round(stayCost), color: dark ? '#6B9483' : '#8F6840' },
     { name: 'ค่าอาหาร', value: Math.round(foodCost), color: dark ? '#B7CEC1' : '#C89F72' },
   ].filter((d) => d.value > 0);
@@ -535,6 +600,10 @@ function App() {
     setOrigin('เมืองร้อยเอ็ด');
     setDestination('');
     setDays(emptyDays());
+    setTravelMode('car');
+    setTransitType('bus');
+    setTicketPrice('0');
+    setLocalCost('0');
     setCarName('Honda City 1.0 Turbo RS');
     setFuelEfficiency('18');
     setFuelPrice('37');
@@ -583,6 +652,10 @@ function App() {
           stops: d.stops.map((s) => s.name.trim()).filter(Boolean),
         })),
         stopNames: days.flatMap((d) => d.stops.map((s) => s.name.trim()).filter(Boolean)),
+        travelMode,
+        transitType,
+        ticketPrice,
+        localCost,
         carName: carName.trim(),
         fuelEfficiency,
         fuelPrice,
@@ -662,9 +735,13 @@ function App() {
     setDestination(trip.destination);
     const loaded = daysFromTrip(trip);
     setDays(loaded.length > 0 ? loaded : emptyDays());
-    setCarName(trip.carName);
-    setFuelEfficiency(trip.fuelEfficiency);
-    setFuelPrice(trip.fuelPrice);
+    setTravelMode(trip.travelMode === 'public' ? 'public' : 'car');
+    setTransitType(asTransitType(trip.transitType));
+    setTicketPrice(trip.ticketPrice ?? '0');
+    setLocalCost(trip.localCost ?? '0');
+    setCarName(trip.carName ?? '');
+    setFuelEfficiency(trip.fuelEfficiency ?? '18');
+    setFuelPrice(trip.fuelPrice ?? '37');
     setNights(trip.nightAmounts.map((amount, i) => makeNight(i + 1, amount)));
     setFood(trip.food);
     setRoundTrip(trip.roundTrip);
@@ -754,13 +831,20 @@ function App() {
       routeLine,
       '',
       `🛣️ ระยะทางรวม: ${fmtNum(totalDistanceKm)} กม.`,
-      driveMinutes !== null
+      !isPublic && driveMinutes !== null
         ? `⏱️ เวลาเดินทาง ~${Math.floor(driveMinutes / 60)} ชม. ${Math.round(driveMinutes % 60)} นาที`
         : null,
-      `🚙 รถ: ${carName.trim() || '—'}`,
+      isPublic
+        ? `🚌 เดินทางด้วย: ${transit.label}`
+        : `🚙 รถ: ${carName.trim() || '—'}`,
       '',
       `💰 สรุปค่าใช้จ่าย:`,
-      ` ⛽ ค่าน้ำมัน: ${fmtBaht(fuelCost ?? 0)}`,
+      isPublic
+        ? ` 🎫 ${transit.ticket}: ${fmtBaht(ticketCost)}${roundTrip ? ' (ไป-กลับ x2)' : ''}`
+        : ` ⛽ ค่าน้ำมัน: ${fmtBaht(fuelCost ?? 0)}`,
+      isPublic && localTransportCost > 0
+        ? ` 🛺 ค่าเดินทางท้องถิ่น: ${fmtBaht(localTransportCost)}`
+        : null,
       ` 🏨 ค่าที่พัก: ${fmtBaht(stayCost)}`,
       ` 🍜 ค่าอาหาร: ${fmtBaht(foodCost)}`,
       ` ─────────────`,
@@ -853,7 +937,7 @@ function App() {
             : '-translate-y-3 opacity-0'
         }`}
       >
-        <div className="flex items-center gap-2 rounded-full bg-slate-900/90 px-5 py-2.5 text-sm font-semibold text-white shadow-xl backdrop-blur-sm">
+        <div className="flex items-center gap-2 rounded-full border border-white/10 bg-[#2F332E]/95 px-5 py-2.5 text-sm font-semibold text-white shadow-xl backdrop-blur-sm">
           <CheckCircle2 size={16} className="text-emerald-400" />
           {toast || ' '}
         </div>
@@ -862,9 +946,13 @@ function App() {
       <header className="sticky top-0 z-20 border-b border-slate-200/60 bg-slate-100/90 shadow-sm backdrop-blur-md transition-colors dark:bg-slate-50/90">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-teal-500 to-teal-700 text-white shadow-md shadow-teal-600/25">
-              <RouteIcon size={20} strokeWidth={2.4} />
-            </div>
+            <img
+              src="/icon.svg"
+              alt="Trip Planner"
+              width={40}
+              height={40}
+              className="h-10 w-10 shrink-0 rounded-xl shadow-md shadow-teal-600/25"
+            />
             <div>
               <h1 className="text-base font-bold leading-tight text-slate-900 sm:text-lg">
                 Trip Planner
@@ -907,6 +995,11 @@ function App() {
                 label: `ทริปที่บันทึกไว้${savedTrips.length > 0 ? ` (${savedTrips.length})` : ''}`,
                 Icon: FolderOpen,
               },
+              {
+                key: 'gallery',
+                label: `คลังรูปภาพ${tripPhotos.photos.length > 0 ? ` (${tripPhotos.photos.length})` : ''}`,
+                Icon: ImagePlus,
+              },
             ] as const
           ).map(({ key, label, Icon }) => (
             <button
@@ -914,13 +1007,13 @@ function App() {
               role="tab"
               aria-selected={tab === key}
               onClick={() => setTab(key)}
-              className={`flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-xs font-bold transition active:scale-[0.97] sm:flex-none sm:px-5 sm:text-sm ${
+              className={`flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-2 py-2 text-[11px] font-bold transition active:scale-[0.97] sm:flex-none sm:px-5 sm:text-sm ${
                 tab === key
                   ? 'bg-teal-600 text-white shadow-sm'
                   : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
               }`}
             >
-              <Icon size={15} />
+              <Icon size={15} className="max-sm:hidden" />
               {label}
             </button>
           ))}
@@ -1073,6 +1166,94 @@ function App() {
             </div>
 
             <div className="space-y-4">
+              {/* Segmented control: โหมดการเดินทาง */}
+              <div
+                role="radiogroup"
+                aria-label="โหมดการเดินทาง"
+                className="grid grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-slate-50/60 p-1"
+              >
+                {(
+                  [
+                    { key: 'car', label: 'รถส่วนตัว', Icon: Car },
+                    { key: 'public', label: 'ขนส่งสาธารณะ', Icon: Bus },
+                  ] as const
+                ).map(({ key, label, Icon }) => (
+                  <button
+                    key={key}
+                    role="radio"
+                    aria-checked={travelMode === key}
+                    onClick={() => setTravelMode(key)}
+                    className={`flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-bold transition active:scale-[0.97] sm:text-sm ${
+                      travelMode === key
+                        ? 'bg-teal-600 text-white shadow-sm'
+                        : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+                    }`}
+                  >
+                    <Icon size={15} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {isPublic && (
+                <>
+                  <div>
+                    <p className="mb-1.5 text-xs font-semibold text-slate-600">ประเภทพาหนะ</p>
+                    <div className="grid grid-cols-4 gap-2">
+                      {TRANSIT_OPTIONS.map(({ key, label, Icon }) => (
+                        <button
+                          key={key}
+                          onClick={() => setTransitType(key)}
+                          aria-pressed={transitType === key}
+                          className={`flex flex-col items-center gap-1 rounded-xl border px-1 py-2.5 text-[11px] font-semibold transition active:scale-95 ${
+                            transitType === key
+                              ? 'border-teal-600 bg-teal-50 text-teal-700'
+                              : 'border-slate-200 bg-slate-50/60 text-slate-500 hover:border-teal-300'
+                          }`}
+                        >
+                          <Icon size={18} />
+                          <span className="whitespace-nowrap">{label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <Field label="ค่าตั๋วเดินทาง (บาท / เที่ยว)">
+                    <div className="relative">
+                      <Coins size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="number"
+                        min="0"
+                        value={ticketPrice}
+                        onChange={(e) => setTicketPrice(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-teal-500 focus:bg-white focus:ring-2 focus:ring-teal-500/20"
+                      />
+                    </div>
+                    <p className="mt-1 text-[11px] font-medium text-slate-500">
+                      {roundTrip
+                        ? `ไป-กลับ x2 = ${fmtBaht(ticketCost)}`
+                        : 'เที่ยวเดียว (เปิด "คำนวณแบบไป-กลับ" เพื่อคูณ 2 อัตโนมัติ)'}
+                    </p>
+                  </Field>
+
+                  <Field label="ค่าเดินทางท้องถิ่น / รถเช่าปลายทาง (บาท) — ไม่บังคับ">
+                    <div className="relative">
+                      <CarTaxiFront size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="เช่น รถแดง แกร็บ เช่ามอเตอร์ไซค์"
+                        value={localCost}
+                        onChange={(e) => setLocalCost(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-teal-500 focus:bg-white focus:ring-2 focus:ring-teal-500/20"
+                      />
+                    </div>
+                  </Field>
+                </>
+              )}
+
+              {!isPublic && (
+              <>
               <Field label="ชื่อรถ" icon={<Car size={15} className="text-slate-400" />}>
                 <input
                   value={carName}
@@ -1107,6 +1288,8 @@ function App() {
                   </div>
                 </Field>
               </div>
+              </>
+              )}
             </div>
           </section>
 
@@ -1252,15 +1435,13 @@ function App() {
                 scrollWheelZoom={false}
                 className="h-full w-full"
               >
+                {/* ไทล์ OSM ชุดเดียวทั้งสองโหมด — Dark Mode ใช้ CSS filter (.map-tiles ใน index.css) */}
                 <TileLayer
-                  key={dark ? 'dark' : 'light'}
+                  className="map-tiles"
                   attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                  url={
-                    dark
-                      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-                      : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
-                  }
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
+                <MapResizer active={tab === 'plan'} dark={dark} />
                 <FitBounds coords={mapLine ?? NO_COORDS} active={tab === 'plan'} />
                 {route && (
                   <>
@@ -1364,7 +1545,7 @@ function App() {
                     ) : (
                       <p className="text-lg font-bold text-slate-400">-- กม.</p>
                     )}
-                    {driveMinutes !== null && (
+                    {!isPublic && driveMinutes !== null && (
                       <p className="flex items-center gap-1 text-[11px] text-slate-400">
                         <Clock size={11} />
                         ขับรถประมาณ {Math.floor(driveMinutes / 60)} ชม. {Math.round(driveMinutes % 60)} นาที
@@ -1375,11 +1556,21 @@ function App() {
 
                 <div className="flex items-center gap-3 rounded-xl bg-slate-50 p-4">
                   <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-teal-100 text-teal-600">
-                    <Fuel size={18} />
+                    {isPublic ? <transit.Icon size={18} /> : <Fuel size={18} />}
                   </span>
                   <div>
-                    <p className="text-xs text-slate-500">ค่าน้ำมันโดยประมาณ</p>
-                    {fuelCost !== null ? (
+                    <p className="text-xs text-slate-500">
+                      {isPublic ? transit.ticket : 'ค่าน้ำมันโดยประมาณ'}
+                    </p>
+                    {isPublic ? (
+                      <>
+                        <p className="text-lg font-bold text-slate-900">{fmtBaht(ticketCost)}</p>
+                        <p className="text-[11px] text-slate-400">
+                          {roundTrip ? 'ไป-กลับ x2' : 'เที่ยวเดียว'}
+                          {localTransportCost > 0 && ` · + เดินทางท้องถิ่น ${fmtBaht(localTransportCost)}`}
+                        </p>
+                      </>
+                    ) : fuelCost !== null ? (
                       <>
                         <p className="text-lg font-bold text-slate-900">{fmtBaht(fuelCost)}</p>
                         <p className="text-[11px] text-slate-400">
@@ -1607,8 +1798,8 @@ function App() {
                       />
                     </button>
                     {photos.length > 1 && (
-                      <div className="absolute bottom-2 left-2 flex gap-1.5">
-                        {photos.slice(1, 5).map((p, i) => (
+                      <div className="absolute bottom-2 left-2 right-2 flex gap-1">
+                        {photos.slice(1, MAX_PHOTOS).map((p, i) => (
                           <button
                             key={i}
                             onClick={() => setLightbox({ trip, index: i + 1 })}
@@ -1891,10 +2082,10 @@ function App() {
                 {editPhotosId === trip.id && (
                   <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
                     {editPhotos.length > 0 && (
-                      <div className="mb-2 flex flex-wrap gap-2">
+                      <div className="mb-2 grid grid-cols-3 gap-2 sm:grid-cols-6">
                         {editPhotos.map((p, i) => (
                           <div key={i} className="relative">
-                            <img src={p} alt="" className="h-16 w-16 rounded-lg object-cover" />
+                            <img src={p} alt="" className="aspect-square w-full rounded-lg object-cover" />
                             <button
                               onClick={() => setEditPhotos(editPhotos.filter((_, j) => j !== i))}
                               className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-rose-500 text-white shadow"
@@ -1952,6 +2143,20 @@ function App() {
         )}
       </section>
 
+      {/* ============ คลังรูปภาพ (แท็บที่ 3) ============ */}
+      <section
+        hidden={tab !== 'gallery'}
+        className="mx-auto max-w-7xl px-4 pb-16 pt-6 sm:px-6 max-sm:pb-24"
+      >
+        <GalleryTab
+          photos={tripPhotos.photos}
+          loading={tripPhotos.loading}
+          error={tripPhotos.error}
+          trips={savedTrips.map((t) => ({ id: t.id, name: t.name }))}
+          onToast={showToast}
+        />
+      </section>
+
       {/* ============ Save modal ============ */}
       {showSaveModal && (
         <div
@@ -2007,10 +2212,10 @@ function App() {
               <Field label="รูปภาพระหว่างทริป (สูงสุด 4 รูป)">
                 <div className="space-y-2">
                   {modalPhotos.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
+                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
                       {modalPhotos.map((p, i) => (
                         <div key={i} className="relative">
-                          <img src={p} alt="" className="h-16 w-16 rounded-lg object-cover" />
+                          <img src={p} alt="" className="aspect-square w-full rounded-lg object-cover" />
                           <button
                             onClick={() =>
                               setModalPhotos(modalPhotos.filter((_, j) => j !== i))
@@ -2159,7 +2364,7 @@ function App() {
             )}
           </div>
           <div
-            className="flex justify-center gap-2 pb-6"
+            className="flex flex-wrap justify-center gap-2 px-4 pb-6"
             onClick={(e) => e.stopPropagation()}
           >
             {lightbox.trip.photos.map((p, i) => (

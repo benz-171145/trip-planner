@@ -88,7 +88,12 @@ export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   darkMode: 'class',
   theme: {
-    extend: { colors },
+    extend: {
+      colors,
+      // `bg-white` = สีพื้นการ์ด: ขาวใน Light Mode, Dark Sage ใน Dark Mode (ดู --c-card ใน index.css)
+      // ส่วน `text-white` ยังเป็นสีขาวจริง เพื่อให้ตัวอักษรบนปุ่มสีเขียว/น้ำตาลอ่านชัดเสมอ
+      backgroundColor: { white: 'rgb(var(--c-card) / <alpha-value>)' },
+    },
   },
   plugins: [],
 };

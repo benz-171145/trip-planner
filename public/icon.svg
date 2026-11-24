@@ -1,10 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" fill="#4A6B5D"/>
-  <!-- route: dashed sand path -->
-  <path d="M132 392 C 200 392, 190 322, 256 322 S 330 392, 384 352" fill="none" stroke="#D4AE82" stroke-width="22" stroke-linecap="round" stroke-dasharray="1 44"/>
-  <circle cx="132" cy="392" r="20" fill="#D4AE82"/>
-  <!-- map pin -->
-  <path d="M256 92 C 200 92, 160 134, 160 188 C 160 252, 232 312, 256 346 C 280 312, 352 252, 352 188 C 352 134, 312 92, 256 92 Z" fill="#FFFFFF"/>
-  <circle cx="256" cy="188" r="44" fill="#4A6B5D"/>
-  <circle cx="256" cy="188" r="20" fill="#D4AE82"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Trip Planner">
+  <defs>
+    <clipPath id="window"><circle cx="256" cy="226" r="106"/></clipPath>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#4A6B5D"/>
+  <!-- map pin (sand) -->
+  <path d="M256 446 C 256 446 116 322 116 226 A140 140 0 0 1 396 226 C 396 322 256 446 256 446 Z" fill="#D4AE82"/>
+  <!-- scene inside the pin -->
+  <circle cx="256" cy="226" r="106" fill="#4A6B5D"/>
+  <g clip-path="url(#window)">
+    <circle cx="304" cy="178" r="17" fill="#F7F5F0"/>
+    <path d="M168 340 L226 232 L284 340 Z" fill="#8FB09F"/>
+    <path d="M238 340 L298 250 L358 340 Z" fill="#6B9483"/>
+    <path d="M256 344 C 196 318, 318 296, 262 262 S 232 236, 258 214" fill="none" stroke="#F7F5F0" stroke-width="9" stroke-linecap="round"/>
+  </g>
 </svg>

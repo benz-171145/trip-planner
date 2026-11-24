@@ -17,6 +17,7 @@
 /* ---------- Sage & Sand theme variables (light defaults, dark overrides) ---------- */
 
 :root {
+  --c-card: 255 255 255;
   --c-slate-50: 243 240 233;
   --c-slate-100: 236 232 222;
   --c-slate-200: 229 224 216;
@@ -83,16 +84,19 @@
 }
 
 html.dark {
-  --c-slate-50: 22 29 26;
-  --c-slate-100: 28 36 33;
-  --c-slate-200: 44 56 51;
-  --c-slate-300: 60 74 68;
-  --c-slate-400: 119 131 124;
-  --c-slate-500: 163 176 170;
+  color-scheme: dark; /* ช่องเลือก/ปฏิทิน/สกรอลล์บาร์ของเบราว์เซอร์เป็นโทนมืด */
+
+  --c-card: 30 36 33; /* #1E2421 พื้นการ์ด */
+  --c-slate-50: 20 24 22; /* #141816 พื้นหลังหน้าเว็บ */
+  --c-slate-100: 37 44 40; /* #252C28 พื้นรอง (hover, แท็บ, ปุ่ม) */
+  --c-slate-200: 51 61 56; /* #333D38 ขอบการ์ด */
+  --c-slate-300: 66 79 72;
+  --c-slate-400: 140 153 146; /* ข้อความจาง/ไอคอน (≥4.5:1 บนการ์ด) */
+  --c-slate-500: 163 177 170; /* #A3B1AA ตัวอักษรรอง */
   --c-slate-600: 190 201 195;
   --c-slate-700: 213 220 215;
   --c-slate-800: 231 234 228;
-  --c-slate-900: 243 241 236;
+  --c-slate-900: 243 244 246; /* #F3F4F6 ตัวอักษรหลัก */
 
   --c-teal-50: 30 40 35;
   --c-teal-100: 36 49 43;
@@ -141,11 +145,36 @@ html.dark {
   --c-rose-600: 224 125 109;
   --c-rose-700: 232 149 135;
 
-  --map-bg: 18 24 22;
+  --map-bg: 20 24 22;
   --pin-start: #6b9483;
   --pin-end: #d4ae82;
   --pin-stop: #d4ae82;
   --route-color: #d4ae82;
+}
+
+html.dark body {
+  background-color: rgb(var(--c-slate-50));
+}
+
+html.dark .leaflet-bar a,
+html.dark .leaflet-bar a:hover {
+  background-color: rgb(var(--c-card));
+  color: rgb(var(--c-slate-800));
+  border-bottom-color: rgb(var(--c-slate-200));
+}
+html.dark .leaflet-bar {
+  border: 1px solid rgb(var(--c-slate-200));
+}
+
+html.dark ::placeholder {
+  color: rgb(var(--c-slate-400));
+  opacity: 1;
+}
+
+/* Dark map: ใช้ไทล์ OpenStreetMap ชุดเดียวกัน แล้วกลับสีด้วย CSS filter
+   (ไม่ต้องพึ่งไทล์ของเจ้าอื่นที่อาจต้องใช้ API Key) */
+html.dark .map-tiles {
+  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.88) saturate(0.55);
 }
 
 /* Leaflet look & feel tuned to the app theme */
@@ -177,7 +206,7 @@ html.dark {
 
 /* lightbox-style dark tile hint for attribution text */
 html.dark .leaflet-control-attribution {
-  background: rgb(28 36 33 / 0.85);
+  background: rgb(30 36 33 / 0.85);
   color: rgb(var(--c-slate-400));
 }
 html.dark .leaflet-control-attribution a {
