@@ -133,6 +133,17 @@ type RouteInfo = {
 
 const makeNight = (amount = '', date = ''): Night => ({ id: uid(), amount, date });
 
+// 'YYYY-MM-DD' → "9 ธ.ค. 2569" (สร้างเป็นวันที่ตามเวลาท้องถิ่น เพื่อไม่ให้วันเลื่อน)
+function fmtThaiDate(date: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!m) return date;
+  return new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString('th-TH', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
 // 'YYYY-MM-DD' + 1 วัน (คำนวณแบบ UTC เพื่อไม่ให้เพี้ยนตามโซนเวลา)
 function nextDate(date: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return '';
@@ -1361,15 +1372,33 @@ function App() {
                       <span className="w-16 shrink-0 rounded-lg bg-amber-50 px-2 py-2.5 text-center text-xs font-bold text-amber-700">
                         คืนที่ {i + 1}
                       </span>
-                      <input
-                        type="date"
-                        value={night.date}
-                        onChange={(e) => updateNightDate(night.id, e.target.value)}
-                        aria-label={`วันที่เข้าพักคืนที่ ${i + 1}`}
-                        className={`w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2 text-sm outline-none transition focus:border-amber-500 focus:bg-white focus:ring-2 focus:ring-amber-500/20 ${
-                          night.date ? 'text-slate-800' : 'text-slate-400'
-                        }`}
-                      />
+                      {/* iOS แสดง <input type="date"> ว่างเป็นกล่องเปล่าและขยายเกินกรอบ
+                          จึงแสดงข้อความ/ไอคอนเอง แล้ววาง input จริงแบบโปร่งใสทับไว้ให้แตะเปิดปฏิทินของเครื่อง */}
+                      <div className="relative flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm transition focus-within:border-amber-500 focus-within:bg-white focus-within:ring-2 focus-within:ring-amber-500/20">
+                        <CalendarDays size={15} className="shrink-0 text-amber-600" />
+                        <span
+                          className={`min-w-0 flex-1 truncate ${
+                            night.date ? 'font-medium text-slate-800' : 'text-slate-400'
+                          }`}
+                        >
+                          {night.date ? fmtThaiDate(night.date) : 'เลือกวันที่เข้าพัก'}
+                        </span>
+                        <input
+                          type="date"
+                          value={night.date}
+                          onChange={(e) => updateNightDate(night.id, e.target.value)}
+                          onClick={(e) => {
+                            // เดสก์ท็อป: เปิดปฏิทินทันทีเมื่อคลิกตรงไหนก็ได้ของช่อง (iOS เปิดเองอยู่แล้ว)
+                            try {
+                              e.currentTarget.showPicker?.();
+                            } catch {
+                              /* เบราว์เซอร์ที่ไม่รองรับ showPicker */
+                            }
+                          }}
+                          aria-label={`วันที่เข้าพักคืนที่ ${i + 1}`}
+                          className="absolute inset-0 h-full w-full min-w-0 flex-1 cursor-pointer appearance-none opacity-0"
+                        />
+                      </div>
                       <div className="relative order-last col-span-3 sm:order-none sm:col-span-1">
                         <input
                           type="number"
