@@ -119,8 +119,8 @@ const asTransitType = (v: unknown): TransitType =>
 
 type Night = {
   id: number;
-  label: string;
   amount: string;
+  date: string; // 'YYYY-MM-DD' หรือ '' ถ้ายังไม่เลือก
 };
 
 type Coord = { lat: number; lon: number };
@@ -131,11 +131,36 @@ type RouteInfo = {
   durationMin: number;
 };
 
-const makeNight = (n: number, amount = ''): Night => ({
-  id: Date.now() + n,
-  label: `คืนที่ ${n}`,
-  amount,
-});
+const makeNight = (amount = '', date = ''): Night => ({ id: uid(), amount, date });
+
+// 'YYYY-MM-DD' + 1 วัน (คำนวณแบบ UTC เพื่อไม่ให้เพี้ยนตามโซนเวลา)
+function nextDate(date: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return '';
+  const d = new Date(date + 'T00:00:00Z');
+  if (Number.isNaN(d.getTime())) return '';
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+// รองรับทั้งรูปแบบใหม่ { cost, date } และทริปเก่าที่เก็บแค่ตัวเลข/ข้อความใน nightAmounts
+function nightsFromTrip(trip: { nights?: unknown; nightAmounts?: unknown }): Night[] {
+  if (Array.isArray(trip.nights)) {
+    return trip.nights.map((n) => {
+      if (n && typeof n === 'object') {
+        const o = n as { cost?: unknown; date?: unknown };
+        return makeNight(
+          o.cost === undefined || o.cost === null ? '' : String(o.cost),
+          typeof o.date === 'string' ? o.date : ''
+        );
+      }
+      return makeNight(n === undefined || n === null ? '' : String(n), '');
+    });
+  }
+  if (Array.isArray(trip.nightAmounts)) {
+    return trip.nightAmounts.map((a) => makeNight(a === undefined || a === null ? '' : String(a), ''));
+  }
+  return [];
+}
 
 // ---------- Saved trips (Firestore) ----------
 
@@ -156,7 +181,8 @@ type SavedTrip = {
   carName: string;
   fuelEfficiency: string;
   fuelPrice: string;
-  nightAmounts: string[];
+  nightAmounts?: string[]; // รูปแบบเก่า (เก็บไว้ให้เวอร์ชันเก่าอ่านได้)
+  nights?: { cost: number; date: string }[];
   food: string;
   roundTrip: boolean;
   travelers: string;
@@ -400,8 +426,8 @@ function App() {
   const [fuelEfficiency, setFuelEfficiency] = useState('18');
   const [fuelPrice, setFuelPrice] = useState('37');
   const [nights, setNights] = useState<Night[]>([
-    makeNight(1, '0'),
-    makeNight(2, '0'),
+    makeNight('0'),
+    makeNight('0'),
   ]);
   const [food, setFood] = useState('0');
 
@@ -590,11 +616,26 @@ function App() {
       )
     );
 
-  const addNight = () => setNights((prev) => [...prev, makeNight(prev.length + 1)]);
+  // Smart Auto-Date: คืนใหม่ = วันที่ของคืนก่อนหน้า + 1 วัน (ถ้าคืนก่อนหน้ามีวันที่)
+  const addNight = () =>
+    setNights((prev) => [
+      ...prev,
+      makeNight('0', prev.length > 0 ? nextDate(prev[prev.length - 1].date) : ''),
+    ]);
   const removeNight = (id: number) =>
     setNights((prev) => prev.filter((n) => n.id !== id));
   const updateNightAmount = (id: number, amount: string) =>
     setNights((prev) => prev.map((n) => (n.id === id ? { ...n, amount } : n)));
+  // เลือกวันที่แล้ว เติมวันที่ถัดไปให้คืนต่อๆ ไปที่ยังว่างอยู่ (หยุดเมื่อเจอคืนที่ผู้ใช้กำหนดเองแล้ว)
+  const updateNightDate = (id: number, date: string) =>
+    setNights((prev) => {
+      const next = prev.map((n) => (n.id === id ? { ...n, date } : n));
+      const start = next.findIndex((n) => n.id === id);
+      for (let j = start + 1; j < next.length && date && !next[j].date; j++) {
+        next[j] = { ...next[j], date: nextDate(next[j - 1].date) };
+      }
+      return next;
+    });
 
   const resetAll = () => {
     setOrigin('เมืองร้อยเอ็ด');
@@ -607,7 +648,7 @@ function App() {
     setCarName('Honda City 1.0 Turbo RS');
     setFuelEfficiency('18');
     setFuelPrice('37');
-    setNights([makeNight(1, '0'), makeNight(2, '0')]);
+    setNights([makeNight('0'), makeNight('0')]);
     setFood('0');
   };
 
@@ -659,6 +700,7 @@ function App() {
         carName: carName.trim(),
         fuelEfficiency,
         fuelPrice,
+        nights: nights.map((n) => ({ cost: parseNum(n.amount), date: n.date })),
         nightAmounts: nights.map((n) => n.amount),
         food,
         roundTrip,
@@ -742,7 +784,7 @@ function App() {
     setCarName(trip.carName ?? '');
     setFuelEfficiency(trip.fuelEfficiency ?? '18');
     setFuelPrice(trip.fuelPrice ?? '37');
-    setNights(trip.nightAmounts.map((amount, i) => makeNight(i + 1, amount)));
+    setNights(nightsFromTrip(trip));
     setFood(trip.food);
     setRoundTrip(trip.roundTrip);
     setTravelers(trip.travelers || '2');
@@ -1309,19 +1351,34 @@ function App() {
                   ค่าที่พัก (บาท)
                 </div>
                 <div className="space-y-2">
-                  {nights.map((night) => (
-                    <div key={night.id} className="flex items-center gap-2">
+                  {nights.map((night, i) => (
+                    // มือถือ: 2 บรรทัดในกรอบเดียว (ป้าย | วันที่ | ลบ  /  ราคา)
+                    // จอ ≥ sm: แถวเดียว (ป้าย | วันที่ | ราคา | ลบ)
+                    <div
+                      key={night.id}
+                      className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/40 p-2 sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto] sm:border-0 sm:bg-transparent sm:p-0"
+                    >
                       <span className="w-16 shrink-0 rounded-lg bg-amber-50 px-2 py-2.5 text-center text-xs font-bold text-amber-700">
-                        {night.label}
+                        คืนที่ {i + 1}
                       </span>
-                      <div className="relative flex-1">
+                      <input
+                        type="date"
+                        value={night.date}
+                        onChange={(e) => updateNightDate(night.id, e.target.value)}
+                        aria-label={`วันที่เข้าพักคืนที่ ${i + 1}`}
+                        className={`w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2 text-sm outline-none transition focus:border-amber-500 focus:bg-white focus:ring-2 focus:ring-amber-500/20 ${
+                          night.date ? 'text-slate-800' : 'text-slate-400'
+                        }`}
+                      />
+                      <div className="relative order-last col-span-3 sm:order-none sm:col-span-1">
                         <input
                           type="number"
                           min="0"
                           placeholder="0"
                           value={night.amount}
                           onChange={(e) => updateNightAmount(night.id, e.target.value)}
-                          className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2.5 pl-8 pr-3 text-sm outline-none transition focus:border-amber-500 focus:bg-white focus:ring-2 focus:ring-amber-500/20"
+                          aria-label={`ค่าที่พักคืนที่ ${i + 1} (บาท)`}
+                          className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2.5 pl-3 pr-8 text-sm outline-none transition focus:border-amber-500 focus:bg-white focus:ring-2 focus:ring-amber-500/20"
                         />
                         <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">
                           ฿
@@ -1330,7 +1387,7 @@ function App() {
                       <button
                         onClick={() => removeNight(night.id)}
                         className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-slate-300 transition hover:bg-rose-50 hover:text-rose-500 active:scale-90"
-                        aria-label="ลบคืนนี้"
+                        aria-label={`ลบคืนที่ ${i + 1}`}
                       >
                         <Trash2 size={16} />
                       </button>
